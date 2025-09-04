@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>12 Beads (Barah Bazi)</title>
+<style>
+  body {
+    margin: 0;
+    padding: 0;
+    background: #000; /* keep black border around */
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 100vh; /* full screen center */
+  }
+
+  #gameWrapper {
+    width: 390px;   /* Fixed iPhone width */
+    height: 844px;  /* Fixed iPhone height */
+    background: #222;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    border: 2px solid #444;
+    border-radius: 20px; /* rounded like phone */
+    overflow: hidden;
+  }
+
+  #gameContainer {
+    flex: 1;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    width: 100%;
+  }
+
+  canvas {
+    width: 100%;
+    height: 100%;
+    display: block;
+  }
+
+  h1 {
+    margin: 5px;
+    font-size: 20px;
+    color: white;
+    text-align: center;
+  }
+
+  .controls {
+    margin: 4px;
+  }
+
+  button {
+    background: #fff;
+    color: #000;
+    border: none;
+    padding: 6px 8px;
+    margin: 0px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 12px;
+    box-shadow: 0px 2px 4px rgba(0,0,0,0.4);
+  }
+
+  button:hover {
+    background: #ddd;
+  }
+
+  #status {
+    margin: 4px;
+    font-size: 14px;
+    font-weight: bold;
+    color: white;
+  }
+</style>
+</head>
+<body>
+  <div id="gameWrapper">
+    <h1>12 Beads (Barah Bazi)</h1>
+    <div id="gameContainer">
+      <canvas id="board" width="390" height="700"></canvas>
+    </div>
+    <div class="controls">
+      <button onclick="newGame()">New Game</button>
+      <button onclick="undo()">Undo</button>
+      <button onclick="toggleMode()" id="modeBtn">Mode: Free Move</button>
+    </div>
+    <div id="status"></div>
+  </div>
+
+<script>
+const canvas = document.getElementById('board');
+const ctx = canvas.getContext('2d');
+const background = new Image();
+background.src = "Untitled-2-01 (1).jpg"; // background board
+
+// load gold pin image
+const goldPin = new Image();
+goldPin.src = "pin2-01.png";
+
+// load silver pin image
+const silverPin = new Image();
+silverPin.src = "pin-01.png";
+
+const rows = 5, cols = 5;
+let spacingX, spacingY;
+let board = [];
+let currentPlayer = 'gold';
+let selected = null;
+let history = [];
+let strictMode = false;
+
+let boardX, boardY, gridWidth, gridHeight;
+
+// Fixed resize function (lock to canvas size)
+function resizeCanvas() {
+  let w = canvas.width;
+  let h = canvas.height;
+
+  gridWidth = w * 0.73;
+  gridHeight = h * 0.35;
+
+  spacingX = gridWidth / (cols - 1.6);
+  spacingY = gridHeight / (rows - 1.6);
+
+  boardX = (w - gridWidth) / 2.5;
+  boardY = (h - gridHeight) / 2.4;
+
+  drawBoard();
+}
+
+function initBoard() {
+  board = [];
+  for (let r = 0; r < rows; r++) {
+    board[r] = [];
+    for (let c = 0; c < cols; c++) {
+      board[r][c] = null;
+    }
+  }
+  // Gold
+  for (let r = 0; r < 2; r++) {
+    for (let c = 0; c < cols; c++) {
+      board[r][c] = 'gold';
+    }
+  }
+  board[2][0] = 'gold';
+  board[2][1] = 'gold';
+
+  // Silver
+  for (let r = rows-2; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      board[r][c] = 'silver';
+    }
+  }
+  board[2][3] = 'silver';
+  board[2][4] = 'silver';
+}
+
+function drawBoard() {
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  ctx.drawImage(background, 0, 0, canvas.width, canvas.height);
+
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      if (board[r][c]) {
+        let x = boardX + c*spacingX;
+        let y = boardY + r*spacingY;
+        // smaller piece size (was 0.7 → now 0.55)
+        let size = Math.min(spacingX, spacingY) * 0.55;
+        if (board[r][c] === 'gold') {
+          ctx.drawImage(goldPin, x - size/2, y - size/2, size, size);
+        } else {
+          ctx.drawImage(silverPin, x - size/2, y - size/2, size, size);
+        }
+      }
+    }
+  }
+  if (selected) {
+    let x = boardX + selected.c*spacingX;
+    let y = boardY + selected.r*spacingY;
+    ctx.beginPath();
+    ctx.arc(x,y,Math.min(spacingX, spacingY)/5+3,0,2*Math.PI); // slightly smaller circle
+    ctx.strokeStyle = "lime";
+    ctx.lineWidth = 3;
+    ctx.stroke();
+  }
+}
+
+function inBounds(r,c){ return r>=0 && r<rows && c>=0 && c<cols; }
+
+function getValidMoves(r,c) {
+  let moves = [];
+  let dirs = [[1,0],[-1,0],[0,1],[0,-1],[1,1],[1,-1],[-1,1],[-1,-1]];
+  for (let [dr,dc] of dirs) {
+    let nr = r+dr, nc = c+dc;
+    if (inBounds(nr,nc) && !board[nr][nc]) {
+      moves.push({r:nr,c:nc,capture:false});
+    }
+    let jr = r+2*dr, jc = c+2*dc;
+    if (inBounds(jr,jc) && !board[jr][jc] && board[nr][nc] && board[nr][nc]!==currentPlayer) {
+      moves.push({r:jr,c:jc,capture:true,mid:{r:nr,c:nc}});
+    }
+  }
+  return moves;
+}
+
+function handleClick(e) {
+  const rect = canvas.getBoundingClientRect();
+  const x = e.clientX - rect.left;
+  const y = e.clientY - rect.top;
+  let c = Math.round((x - boardX)/spacingX);
+  let r = Math.round((y - boardY)/spacingY);
+  if (!inBounds(r,c)) return;
+
+  if (selected) {
+    let moves = getValidMoves(selected.r,selected.c);
+    let move = moves.find(m=>m.r===r && m.c===c);
+    if (move) {
+      history.push(JSON.parse(JSON.stringify(board)));
+      board[r][c] = currentPlayer;
+      board[selected.r][selected.c] = null;
+      if (move.capture) {
+        board[move.mid.r][move.mid.c] = null;
+      }
+      currentPlayer = currentPlayer==='gold' ? 'silver':'gold';
+    }
+    selected = null;
+  } else {
+    if (board[r][c]===currentPlayer) {
+      selected = {r,c};
+    }
+  }
+  updateStatus();
+  drawBoard();
+}
+
+function updateStatus(){
+  document.getElementById('status').innerText = (currentPlayer==='gold'?'Gold':'Silver') + "'s turn";
+}
+
+canvas.addEventListener('click', handleClick);
+
+function newGame(){
+  initBoard();
+  history=[];
+  currentPlayer='gold';
+  selected=null;
+  updateStatus();
+  resizeCanvas();
+}
+
+function undo(){
+  if(history.length>0){
+    board = history.pop();
+    currentPlayer = currentPlayer==='gold'?'silver':'gold';
+    updateStatus();
+    drawBoard();
+  }
+}
+
+function toggleMode(){
+  strictMode = !strictMode;
+  document.getElementById('modeBtn').innerText = strictMode ? "Mode: Strict Capture":"Mode: Free Move";
+}
+
+background.onload = () => newGame();
+</script>
+</body>
+</html>
